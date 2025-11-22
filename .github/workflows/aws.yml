@@ -1,0 +1,649 @@
+# This workflow will build and push a new container image to Amazon ECR,
+# and then will deploy a new task definition to Amazon ECS, when there is a push to the "main" branch.
+#
+# To use this workflow, you will need to complete the following set-up steps:
+#
+# 1. Create an ECR repository to store your images.
+#    For example: `aws ecr create-repository --repository-name my-ecr-repo --region us-east-2`.
+#    Replace the value of the `ECR_REPOSITORY` environment variable in the workflow below with your repository's name.
+#    Replace the value of the `AWS_REGION` environment variable in the workflow below with your repository's region.
+#
+# 2. Create an ECS task definition, an ECS cluster, and an ECS service.
+#    For example, follow the Getting Started guide on the ECS console:
+#      https://us-east-2.console.aws.amazon.com/ecs/home?region=us-east-2#/firstRun
+#    Replace the value of the `ECS_SERVICE` environment variable in the workflow below with the name you set for the Amazon ECS service.
+#    Replace the value of the `ECS_CLUSTER` environment variable in the workflow below with the name you set for the cluster.
+#
+# 3. Store your ECS task definition as a JSON file in your repository.
+#    The format should follow the output of `aws ecs register-task-definition --generate-cli-skeleton`.
+#    Replace the value of the `ECS_TASK_DEFINITION` environment variable in the workflow below with the path to the JSON file.
+#    Replace the value of the `CONTAINER_NAME` environment variable in the workflow below with the name of the container
+#    in the `containerDefinitions` section of the task definition.
+#
+
+
+# 4. Store an IAM user access key in GitHub Actions secrets named `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+#    See the documentation for each action used below for the recommended IAM policies for this IAM user,
+#    and best practices on handling the access key credentials.
+
+name: Deploy to Amazon ECS
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  AWS_REGION: MY_AWS_REGION                   # set this to your preferred AWS region, e.g. us-west-1
+  ECR_REPOSITORY: MY_ECR_REPOSITORY           # set this to your Amazon ECR repository name
+  ECS_SERVICE: MY_ECS_SERVICE                 # set this to your Amazon ECS service name
+  ECS_CLUSTER: MY_ECS_CLUSTER                 # set this to your Amazon ECS cluster name
+  ECS_TASK_DEFINITION: MY_ECS_TASK_DEFINITION # set this to the path to your Amazon ECS task definition
+                                               # file, e.g. .aws/task-definition.json
+  CONTAINER_NAME: MY_CONTAINER_NAME           # set this to the name of the container in the
+                                               # containerDefinitions section of your task definition
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Build a docker container and
+        # push it to ECR so that it can
+        # be deployed to ECS.
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+    - name: Fill in the new image ID in the Amazon ECS task definition
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: ${{ env.ECS_TASK_DEFINITION }}
+        container-name: ${{ env.CONTAINER_NAME }}
+        image: ${{ steps.build-image.outputs.image }}
+
+    - name: Deploy Amazon ECS task definition
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ env.ECS_SERVICE }}
+        cluster: ${{ env.ECS_CLUSTER }}
+        wait-for-service-stability: true
+
+{
+  "name": "gaby-store-next",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "14.2.4",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "firebase": "^10.12.0",
+    "firebase-admin": "^11.10.0",
+    "stripe": "^12.0.0",
+    "axios": "^1.6.8",
+    "classnames": "^2.5.1"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+  experimental: { appDir: true },
+  swcMinify: true
+};
+module.exports = nextConfig;
+NEXT_PUBLIC_FIREBASE_API_KEY=YOUR_API_KEY
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=YOUR_AUTH_DOMAIN
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=YOUR_PROJECT_ID
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=YOUR_STORAGE_BUCKET
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=YOUR_MESSAGING_ID
+NEXT_PUBLIC_FIREBASE_APP_ID=YOUR_APP_ID
+NEXT_PUBLIC_BASE_URL=http://localhost:3000
+
+# Stripe (server-side)
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+
+# Firebase Admin (service account JSON as base64 optional)
+# Option A: use GOOGLE_APPLICATION_CREDENTIALS and place service account file locally
+# Option B: set FIREBASE_SERVICE_ACCOUNT (base64 JSON) and decode on server
+FIREBASE_SERVICE_ACCOUNT_BASE64=
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.token.admin == true;
+    }
+    match /orders/{orderId} {
+      allow create: if true;
+      allow read: if request.auth != null && (request.auth.uid == resource.data.customer.uid || request.auth.token.admin == true);
+      allow update: if request.auth != null && request.auth.token.admin == true;
+    }
+    match /users/{userId} {
+      allow read, write: if request.auth != null && (request.auth.uid == userId || request.auth.token.admin == true);
+    }
+  }
+}
+# Gaby Store (Next.js + Firebase) - E-commerce Pro
+
+## Setup local (VS Code)
+1. Copie o arquivo de imagem que você enviou para o projeto:
+   - Local original (fornecido): `/mnt/data/A_digital_user_interface_design_showcases_an_e-com.png`
+   - Copie para: `public/assets/product-sample.png`
+
+2. Copie `.env.example` para `.env.local` e preencha as chaves (Firebase + Stripe).
+
+3. Instale dependências:
+   ```bash
+   npm install
+npm run dev
+admin.auth().setCustomUserClaims(uid, { admin: true });
+
+---
+
+# 6) Public asset — copy your image
+Coloque o arquivo que você enviou em:
+Local original do upload (use se preferir):  
+`/mnt/data/A_digital_user_interface_design_showcases_an_e-com.png`
+
+---
+
+# 7) `src/lib/firebaseClient.js` (client-side)
+```js
+// src/lib/firebaseClient.js
+import { initializeApp, getApps } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
+
+const firebaseConfig = {
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
+};
+
+let app = null;
+if (!getApps().length) {
+  app = initializeApp(firebaseConfig);
+} else {
+  app = getApps()[0];
+}
+
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+export const storage = getStorage(app);
+export default app;
+// src/lib/firebaseAdmin.js (server-side for API routes)
+import admin from "firebase-admin";
+
+let app;
+if (!admin.apps.length) {
+  // Prefer using GOOGLE_APPLICATION_CREDENTIALS env var.
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+    const sa = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, "base64").toString("utf8"));
+    app = admin.initializeApp({ credential: admin.credential.cert(sa) });
+  } else {
+    app = admin.initializeApp();
+  }
+}
+
+export const adminAuth = admin.auth();
+export const adminDb = admin.firestore();
+export default admin;
+// src/hooks/useCart.js (client)
+import { useState, useEffect } from "react";
+
+const KEY = "gaby_cart_v1";
+
+export function useCart() {
+  const [cart, setCart] = useState({});
+
+  useEffect(()=> {
+    try {
+      const raw = localStorage.getItem(KEY);
+      setCart(raw ? JSON.parse(raw) : {});
+    } catch {
+      setCart({});
+    }
+  }, []);
+
+  function save(next) {
+    const val = typeof next === "function" ? next(cart) : next;
+    setCart(val);
+    localStorage.setItem(KEY, JSON.stringify(val));
+  }
+
+  function clear() {
+    setCart({});
+    localStorage.removeItem(KEY);
+  }
+
+  return { cart, setCart: save, clear };
+}
+:root{
+  --primary:#ff4f88;
+  --accent:#6c2a3c;
+  --bg:#f8edef;
+  --card:#ffffff;
+  --muted:#6b6b6b;
+}
+html,body,#__next{height:100%}
+body{margin:0;font-family:Inter,Arial,sans-serif;background:var(--bg);color:var(--accent)}
+.container{max-width:1200px;margin:0 auto;padding:20px}
+.header{background:var(--accent);color:#fff;padding:12px}
+.card{background:var(--card);padding:12px;border-radius:12px;box-shadow:0 6px 14px rgba(0,0,0,0.06)}
+.primary-btn{background:var(--primary);color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}
+.ghost-btn{background:transparent;border:1px solid #ddd;padding:8px 12px;border-radius:8px;cursor:pointer}
+input,select,textarea{padding:8px;border-radius:8px;border:1px solid #eee}
+.product-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px}
+.product-image{width:100%;height:200px;object-fit:cover;border-radius:8px}
+.admin-table{width:100%;border-collapse:collapse}
+.admin-table th, .admin-table td{padding:8px;border-bottom:1px solid #f4e9ec;text-align:left}
+@media(max-width:800px){
+  .product-grid{grid-template-columns:repeat(2,1fr)}
+}
+// src/app/layout.js
+import "../styles/globals.css";
+import Header from "../components/Header";
+
+export const metadata = { title: "Gaby Store", description: "Loja virtual" };
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="pt-BR">
+      <body>
+        <Header />
+        <div className="container">{children}</div>
+      </body>
+    </html>
+  );
+}
+// src/components/Header.jsx
+"use client";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+
+export default function Header(){
+  const [count, setCount] = useState(0);
+  useEffect(()=>{
+    const raw = typeof window !== "undefined" ? localStorage.getItem("gaby_cart_v1") : null;
+    const cart = raw ? JSON.parse(raw) : {};
+    const c = Object.values(cart).reduce((s,ci) => s + (ci.qty || 0), 0);
+    setCount(c);
+  }, []);
+  return (
+    <header className="header">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",maxWidth:1200,margin:"0 auto"}}>
+        <Link href="/"><div style={{display:"flex",gap:10,alignItems:"center"}}><div style={{background:"#ff4f88",padding:8,borderRadius:8}}>📦</div><strong>Gaby Store</strong></div></Link>
+        <nav style={{display:"flex",gap:12}}>
+          <Link href="/carrinho" style={{color:"#fff'}}>Carrinho ({count})</Link>
+          <Link href="/admin" style={{color:"#fff"}}>Admin</Link>
+        </nav>
+      </div>
+    </header>
+  );
+}
+// src/components/ProductCard.jsx
+"use client";
+import Link from "next/link";
+
+export default function ProductCard({ product }) {
+  return (
+    <div className="card">
+      <Link href={`/produto/${product.id}`}>
+        <img src={product.image || "/assets/product-sample.png"} className="product-image" alt={product.title} />
+      </Link>
+      <div style={{paddingTop:8}}>
+        <div style={{fontWeight:700}}>{product.title}</div>
+        <div style={{color:"#ff4f88",fontWeight:700}}>R$ {Number(product.price).toFixed(2)}</div>
+        <div style={{color:"#666"}}>{product.stock} unidades</div>
+        <div style={{marginTop:8,display:"flex",gap:8}}>
+          <button onClick={()=>{
+            const raw = localStorage.getItem("gaby_cart_v1");
+            const cart = raw ? JSON.parse(raw) : {};
+            cart[product.id] = cart[product.id] ? {...cart[product.id], qty: cart[product.id].qty + 1} : { product, qty: 1 };
+            localStorage.setItem("gaby_cart_v1", JSON.stringify(cart));
+            alert("Adicionado ao carrinho");
+          }} className="primary-btn">Adicionar</button>
+          <Link href={`/produto/${product.id}`}><button className="ghost-btn">Ver</button></Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+// src/app/page.js
+import { useEffect, useState } from "react";
+import { db } from "../lib/firebaseClient";
+import { collection, getDocs } from "firebase/firestore";
+import ProductCard from "../components/ProductCard";
+
+export default function HomePage() {
+  const [products, setProducts] = useState([]);
+  useEffect(()=>{
+    async function load() {
+      const snap = await getDocs(collection(db, "products"));
+      setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }
+    load();
+  }, []);
+  return (
+    <section>
+      <h1 style={{marginBottom:16}}>Gaby Store — Produtos</h1>
+      <div className="product-grid">
+        {products.length === 0 ? <div>Carregando ou nenhum produto cadastrado.</div> : products.map(p => <ProductCard key={p.id} product={p} />)}
+      </div>
+    </section>
+  );
+}
+// src/app/produto/[id]/page.js
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../../../lib/firebaseClient";
+
+export default async function ProductPage({ params }) {
+  const id = params.id;
+  const ref = doc(db, "products", id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return <div>Produto não encontrado</div>;
+  const p = { id: snap.id, ...snap.data() };
+
+  return (
+    <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
+      <div style={{flex:"0 0 420px"}}>
+        <img src={p.image || "/assets/product-sample.png"} style={{width:"100%",borderRadius:12}} />
+      </div>
+      <div style={{flex:1}}>
+        <h2>{p.title}</h2>
+        <p style={{color:"#ff4f88",fontSize:22}}>R$ {Number(p.price).toFixed(2)}</p>
+        <p>Estoque: {p.stock}</p>
+        <div style={{marginTop:12}}>
+          <button className="primary-btn" onClick={()=>{
+            const cartRaw = typeof window !== "undefined" && localStorage.getItem("gaby_cart_v1");
+            const cart = cartRaw ? JSON.parse(cartRaw) : {};
+            cart[p.id] = cart[p.id] ? {...cart[p.id], qty: cart[p.id].qty + 1} : { product: p, qty: 1 };
+            localStorage.setItem("gaby_cart_v1", JSON.stringify(cart));
+            alert("Adicionado ao carrinho");
+          }}>Adicionar ao carrinho</button>
+        </div>
+        <div style={{marginTop:16}}>{p.description}</div>
+      </div>
+    </div>
+  );
+}
+// src/app/carrinho/page.js
+"use client";
+import { useEffect, useState } from "react";
+import axios from "axios";
+
+export default function CarrinhoPage(){
+  const [cart, setCart] = useState({});
+  useEffect(()=> {
+    const raw = localStorage.getItem("gaby_cart_v1");
+    setCart(raw ? JSON.parse(raw) : {});
+  }, []);
+
+  function updateQty(id, qty){
+    const clone = {...cart};
+    if (!clone[id]) return;
+    clone[id].qty = qty;
+    if (clone[id].qty <= 0) delete clone[id];
+    setCart(clone);
+    localStorage.setItem("gaby_cart_v1", JSON.stringify(clone));
+  }
+
+  async function goCheckout() {
+    const items = Object.values(cart).map(ci => ({ name: ci.product.title, price: Math.round(ci.product.price * 100), quantity: ci.qty }));
+    try {
+      const res = await axios.post("/api/checkout", { items });
+      window.location.href = res.data.url;
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao iniciar checkout.");
+    }
+  }
+
+  const total = Object.values(cart).reduce((s,ci)=> s + ci.product.price * ci.qty, 0);
+
+  return (
+    <div>
+      <h1>Carrinho</h1>
+      {Object.values(cart).length === 0 ? <div>Seu carrinho está vazio.</div> :
+        <div>
+          {Object.values(cart).map(ci => (
+            <div key={ci.product.id} style={{display:"flex",justifyContent:"space-between", padding:8, borderBottom:"1px solid #eee"}}>
+              <div>
+                <div style={{fontWeight:600}}>{ci.product.title}</div>
+                <div>R$ {ci.product.price.toFixed(2)}</div>
+              </div>
+              <div>
+                <button onClick={()=> updateQty(ci.product.id, ci.qty-1)}>-</button>
+                <span style={{padding:"0 8px"}}>{ci.qty}</span>
+                <button onClick={()=> updateQty(ci.product.id, ci.qty+1)}>+</button>
+              </div>
+            </div>
+          ))}
+          <div style={{marginTop:12}}>Total: <strong>R$ {total.toFixed(2)}</strong></div>
+          <div style={{marginTop:12}}>
+            <button className="primary-btn" onClick={goCheckout}>Finalizar compra</button>
+            <button onClick={()=>{ localStorage.removeItem("gaby_cart_v1"); setCart({}); }}>Limpar carrinho</button>
+          </div>
+        </div>
+      }
+    </div>
+  );
+}
+// src/app/admin/page.js
+"use client";
+import { useEffect, useState } from "react";
+import AdminProductForm from "../../components/AdminProductForm";
+import AdminProductsList from "../../components/AdminProductsList";
+
+export default function AdminPage(){
+  const [editing, setEditing] = useState(null);
+  const [showNew, setShowNew] = useState(false);
+  const [reloadFlag, setReloadFlag] = useState(0);
+
+  return (
+    <div>
+      <h1>Painel Admin</h1>
+      <div style={{display:"flex",gap:12, marginBottom:12}}>
+        <button onClick={()=> setShowNew(true)} className="primary-btn">Novo Produto</button>
+        <button onClick={()=> setReloadFlag(f=>f+1)}>Atualizar</button>
+      </div>
+
+      {showNew && <div style={{marginTop:12}}><AdminProductForm onSaved={()=>{ setShowNew(false); setReloadFlag(f=>f+1); }} /></div>}
+
+      <AdminProductsList onEdit={(p)=> setEditing(p)} reloadFlag={reloadFlag} />
+
+      {editing && <div style={{marginTop:16}}><h3>Editar</h3><AdminProductForm product={editing} onSaved={()=>{ setEditing(null); setReloadFlag(f=>f+1); }} /></div>}
+    </div>
+  );
+}
+// src/components/AdminProductForm.jsx
+"use client";
+import { useState } from "react";
+import { db } from "../lib/firebaseClient";
+import { doc, setDoc, addDoc, collection } from "firebase/firestore";
+
+export default function AdminProductForm({ product, onSaved }) {
+  const [title, setTitle] = useState(product?.title || "");
+  const [price, setPrice] = useState(product?.price || 0);
+  const [stock, setStock] = useState(product?.stock || 0);
+  const [image, setImage] = useState(product?.image || "/assets/product-sample.png");
+  const [category, setCategory] = useState(product?.category || "electronics");
+
+  async function save() {
+    const payload = { title, price: Number(price), stock: Number(stock), image, category };
+    if (product?.id) {
+      await setDoc(doc(db, "products", product.id), payload, { merge: true });
+    } else {
+      await addDoc(collection(db, "products"), payload);
+    }
+    onSaved && onSaved();
+  }
+
+  return (
+    <div className="card" style={{maxWidth:600}}>
+      <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Título" />
+      <br/>
+      <input value={price} onChange={e=>setPrice(e.target.value)} placeholder="Preço" type="number" />
+      <br/>
+      <input value={stock} onChange={e=>setStock(e.target.value)} placeholder="Estoque" type="number" />
+      <br/>
+      <input value={image} onChange={e=>setImage(e.target.value)} placeholder="URL imagem" />
+      <br/>
+      <select value={category} onChange={e=>setCategory(e.target.value)}>
+        <option value="electronics">Eletrônicos</option>
+        <option value="fashion">Moda</option>
+        <option value="home">Casa</option>
+      </select>
+      <br/><br/>
+      <div style={{display:"flex",gap:8}}>
+        <button className="primary-btn" onClick={save}>Salvar</button>
+      </div>
+    </div>
+  );
+}
+// src/components/AdminProductsList.jsx
+"use client";
+import { useEffect, useState } from "react";
+import { db } from "../lib/firebaseClient";
+import { collection, getDocs, deleteDoc, doc } from "firebase/firestore";
+
+export default function AdminProductsList({ onEdit, reloadFlag }) {
+  const [products, setProducts] = useState([]);
+  useEffect(()=> {
+    async function load() {
+      const snap = await getDocs(collection(db, "products"));
+      setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }
+    load();
+  }, [reloadFlag]);
+
+  async function remove(id) {
+    if (!confirm("Excluir?")) return;
+    await deleteDoc(doc(db, "products", id));
+    setProducts(p => p.filter(x => x.id !== id));
+  }
+
+  return (
+    <div style={{marginTop:20}}>
+      <table className="admin-table">
+        <thead><tr><th>Imagem</th><th>Título</th><th>Preço</th><th>Estoque</th><th>Ações</th></tr></thead>
+        <tbody>
+          {products.map(p => (
+            <tr key={p.id}>
+              <td><img src={p.image} style={{width:80,height:60,objectFit:"cover"}}/></td>
+              <td>{p.title}</td>
+              <td>R$ {Number(p.price).toFixed(2)}</td>
+              <td>{p.stock}</td>
+              <td>
+                <button onClick={()=> onEdit(p)}>Editar</button>
+                <button onClick={()=> remove(p.id)}>Excluir</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+// src/app/api/checkout/route.js
+import Stripe from "stripe";
+import { NextResponse } from "next/server";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2022-11-15" });
+
+export async function POST(req) {
+  try {
+    const { items } = await req.json();
+    const line_items = items.map(i => ({
+      price_data: {
+        currency: "brl",
+        product_data: { name: i.name },
+        unit_amount: i.price
+      },
+      quantity: i.quantity
+    }));
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      mode: "payment",
+      line_items,
+      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/sucesso?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/carrinho`,
+      metadata: {}
+    });
+
+    return NextResponse.json({ url: session.url });
+  } catch (err) {
+    console.error("Stripe error:", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+// src/app/api/webhook/route.js
+import Stripe from "stripe";
+import { buffer } from "node:stream/consumers";
+import { NextResponse } from "next/server";
+import admin from "../../../../../src/lib/firebaseAdmin"; // path to initialize admin
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2022-11-15" });
+
+export const runtime = "edge" ; // If edge not possible, remove
+
+export async function POST(req) {
+  const sig = req.headers.get("stripe-signature");
+  const raw = await req.text();
+  try {
+    const event = stripe.webhooks.constructEvent(raw, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object;
+      const orderId = session.metadata?.orderId;
+      if (orderId) {
+        const db = admin.firestore();
+        await db.collection("orders").doc(orderId).update({ status: "paid", paidAt: admin.firestore.FieldValue.serverTimestamp() });
+      }
+    }
+    return NextResponse.json({ received: true });
+  } catch (err) {
+    console.error("Webhook error:", err.message);
+    return new Response(`Webhook error: ${err.message}`, { status: 400 });
+  }
+}
